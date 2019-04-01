@@ -30,12 +30,13 @@
 
 -include("../../emqx/include/emqx_mqtt.hrl").
 
+
 %-include("../../../include/emqttd_internal.hrl").
 
 -export([load/1, unload/0]).
 
 %% Hooks functions
--export([on_client_connected/3, on_client_disconnected/3]).
+-export([on_client_connected/4, on_client_disconnected/3]).
 
 -export([on_client_subscribe/3, on_client_subscribe_after/3, on_client_unsubscribe/3]).
 
@@ -46,29 +47,30 @@
 %% Called when the plugin application start
 load(Env) ->
     ekaf_init([Env]),
-    emqttd:hook('client.connected', fun ?MODULE:on_client_connected/3, [Env]),
-    emqttd:hook('client.disconnected', fun ?MODULE:on_client_disconnected/3, [Env]),
-    emqttd:hook('client.subscribe', fun ?MODULE:on_client_subscribe/3, [Env]),
-    emqttd:hook('client.subscribe.after', fun ?MODULE:on_client_subscribe_after/3, [Env]),
-    emqttd:hook('client.unsubscribe', fun ?MODULE:on_client_unsubscribe/3, [Env]),
-    emqttd:hook('message.publish', fun ?MODULE:on_message_publish/2, [Env]),
-    emqttd:hook('message.delivered', fun ?MODULE:on_message_delivered/3, [Env]),
-    emqttd:hook('message.acked', fun ?MODULE:on_message_acked/3, [Env]).
+    emqx:hook('client.connected', fun ?MODULE:on_client_connected/4, [Env]),
+    emqx:hook('client.disconnected', fun ?MODULE:on_client_disconnected/3, [Env]),
+    emqx:hook('client.subscribe', fun ?MODULE:on_client_subscribe/3, [Env]),
+    emqx:hook('client.subscribe.after', fun ?MODULE:on_client_subscribe_after/3, [Env]),
+    emqx:hook('client.unsubscribe', fun ?MODULE:on_client_unsubscribe/3, [Env]),
+    emqx:hook('message.publish', fun ?MODULE:on_message_publish/2, [Env]),
+    emqx:hook('message.delivered', fun ?MODULE:on_message_delivered/3, [Env]),
+    emqx:hook('message.acked', fun ?MODULE:on_message_acked/3, [Env]),
+    io:format("load").
 
 %%-----------client connect start-----------------------------------%%
 
-on_client_connected(ConnAck, #{client_id  := ClientId}, _Env) ->
+on_client_connected(#{client_id  := ClientId},ConnAck,  ConnAttrs,_Env) ->
     io:format("client ~s connected, connack: ~w~n", [ClientId, ConnAck]),
 
     Json = mochijson2:encode([
-        {type, <<"connected">>},
+       {type, <<"connected">>},
         {client_id, ClientId},
-        {cluster_node, node()},
-        {ts, emqx_time:now_to_secs()}
+       {cluster_node, node()},
+      {ts, emqx_time:now_secs()}
     ]),
     
     ekaf:produce_async_batched(<<"broker_message">>, list_to_binary(Json)),
-
+    io:format("published"),
     ok.
 
 %%-----------client connect end-------------------------------------%%
@@ -77,7 +79,7 @@ on_client_connected(ConnAck, #{client_id  := ClientId}, _Env) ->
 
 %%-----------client disconnect start---------------------------------%%
 
-on_client_disconnected(Reason, ClientId, _Env) ->
+on_client_disconnected(#{client_id  := ClientId},Reason,  _Env) ->
     io:format("client ~s disconnected, reason: ~w~n", [ClientId, Reason]),
 
     Json = mochijson2:encode([
@@ -85,7 +87,7 @@ on_client_disconnected(Reason, ClientId, _Env) ->
         {client_id, ClientId},
         {reason, Reason},
         {cluster_node, node()},
-        {ts, emqtx_time:now_to_secs()}
+        {ts, emqx_time:now_secs()}
     ]),
 
     ekaf:produce_async_batched(<<"broker_message">>, list_to_binary(Json)),
@@ -99,7 +101,7 @@ on_client_disconnected(Reason, ClientId, _Env) ->
 %%-----------client subscribed start---------------------------------------%%
 
 %% should retain TopicTable
-on_client_subscribe(ClientId, TopicTable, _Env) ->
+on_client_subscribe(#{client_id  := ClientId}, TopicTable, _Env) ->
     io:format("client ~s will subscribe ~p~n", [ClientId, TopicTable]),
     {ok, TopicTable}.
    
@@ -116,7 +118,7 @@ on_client_subscribe_after(ClientId, TopicTable, _Env) ->
                 {client_id, ClientId},
                 {topic, lists:last(Key)},
                 {cluster_node, node()},
-                {ts, emqtx_time:now_to_secs()}
+                {ts, emqtx_time:now_secs()}
             ]),
             ekaf:produce_async_batched(<<"broker_message">>, list_to_binary(Json));
         _ -> 
@@ -132,7 +134,7 @@ on_client_subscribe_after(ClientId, TopicTable, _Env) ->
 
 %%-----------client unsubscribed start----------------------------------------%%
 
-on_client_unsubscribe(ClientId, Topics, _Env) ->
+on_client_unsubscribe(#{client_id  := ClientId}, Topics, _Env) ->
     io:format("client ~s unsubscribe ~p~n", [ClientId, Topics]),
 
     % build json to send using ClientId
@@ -175,7 +177,7 @@ on_message_publish(Message, _Env) ->
         {payload, Payload},
         {qos, QoS},
         {cluster_node, node()},
-        {ts, emqx_time:now_to_secs(Timestamp)}
+        {ts, emqx_time:now_secs(Timestamp)}
     ]),
 
     ekaf:produce_async_batched(<<"broker_message">>, list_to_binary(Json)),
@@ -183,7 +185,7 @@ on_message_publish(Message, _Env) ->
     {ok, Message}.
 
 %%-----------message delivered start--------------------------------------%%
-on_message_delivered(ClientId, Message, _Env) ->
+on_message_delivered(#{client_id  := ClientId}, Message, _Env) ->
     io:format("delivered to client ~s: ~s~n", [ClientId, emqx_message:format(Message)]),
 
     From = Message#message.from,
@@ -201,7 +203,7 @@ on_message_delivered(ClientId, Message, _Env) ->
         {payload, Payload},
         {qos, QoS},
         {cluster_node, node()},
-        {ts, emqttd_time:now_to_secs(Timestamp)}
+        {ts, emqx_time:now_secs(Timestamp)}
     ]),
 
     ekaf:produce_async_batched(<<"broker_message">>, list_to_binary(Json)),
@@ -210,7 +212,7 @@ on_message_delivered(ClientId, Message, _Env) ->
 %%-----------message delivered end----------------------------------------%%
 
 %%-----------acknowledgement publish start----------------------------%%
-on_message_acked(ClientId, Message, _Env) ->
+on_message_acked(#{client_id  := ClientId}, Message, _Env) ->
     io:format("client ~s acked: ~s~n", [ClientId, emqttd_message:format(Message)]),   
 
     From = Message#message.from,
@@ -228,7 +230,7 @@ on_message_acked(ClientId, Message, _Env) ->
         {payload, Payload},
         {qos, QoS},
         {cluster_node, node()},
-        {ts, emqttd_time:now_to_secs(Timestamp)}
+        {ts, emqx_time:now_secs(Timestamp)}
     ]),
 
     ekaf:produce_async_batched(<<"broker_message">>, list_to_binary(Json)),
@@ -240,7 +242,7 @@ on_message_acked(ClientId, Message, _Env) ->
 
 ekaf_init(_Env) ->
     %% Get parameters
-    {ok, Kafka} = application:get_env(emqttd_plugin_kafka_bridge, kafka),
+    {ok, Kafka} = application:get_env(emqx_plugin_kafka_bridge, kafka),
     BootstrapBroker = proplists:get_value(bootstrap_broker, Kafka),
     PartitionStrategy= proplists:get_value(partition_strategy, Kafka),
     %% Set partition strategy, like application:set_env(ekaf, ekaf_partition_strategy, strict_round_robin),
@@ -260,7 +262,7 @@ ekaf_init(_Env) ->
 
 %% Called when the plugin application stop
 unload() ->
-    emqttd:unhook('client.connected', fun ?MODULE:on_client_connected/3),
+    emqttd:unhook('client.connected', fun ?MODULE:on_client_connected/4),
     emqttd:unhook('client.disconnected', fun ?MODULE:on_client_disconnected/3),
     emqttd:unhook('client.subscribe', fun ?MODULE:on_client_subscribe/3),
     emqttd:unhook('client.subscribe.after', fun ?MODULE:on_client_subscribe_after/3),
